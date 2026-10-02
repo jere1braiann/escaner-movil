@@ -357,7 +357,7 @@ export default function App() {
                 ref={webviewOcrRef}
                 originWhitelist={['*']}
                 source={{ html: ocrHtml, baseUrl: 'https://localhost' }}
-                style={StyleSheet.absoluteFillObject}
+                style={StyleSheet.absoluteFill}
                 allowsInlineMediaPlayback
                 mediaPlaybackRequiresUserAction={false}
                 mediaCapturePermissionGrantType="grant"
