@@ -16,21 +16,6 @@ export default function App() {
   const [extractedData, setExtractedData] = useState<ExtractedData>(null);
   const [finalCode, setFinalCode] = useState<string | null>(null);
 
-  if (!permission) {
-    return <View />;
-  }
-
-  if (!permission.granted) {
-    return (
-      <View style={styles.containerCenter}>
-        <Text style={{ textAlign: 'center', marginBottom: 20 }}>
-          Necesitamos tu permiso para acceder a la cámara
-        </Text>
-        <Button onPress={requestPermission} title="Otorgar Permiso" />
-      </View>
-    );
-  }
-
   const loopScan = async () => {
     if (!isScanning) return;
     
@@ -57,6 +42,21 @@ export default function App() {
         loopScan();
     }
   }, [isScanning]);
+
+  if (!permission) {
+    return <View />;
+  }
+
+  if (!permission.granted) {
+    return (
+      <View style={styles.containerCenter}>
+        <Text style={{ textAlign: 'center', marginBottom: 20 }}>
+          Necesitamos tu permiso para acceder a la cámara
+        </Text>
+        <Button onPress={requestPermission} title="Otorgar Permiso" />
+      </View>
+    );
+  }
 
   const startScanning = () => {
       if (!ocrReady) {
