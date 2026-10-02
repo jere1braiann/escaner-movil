@@ -294,7 +294,7 @@ export default function App() {
         </View>
       ) : (
         <View style={styles.cameraWrapper}>
-            <CameraView style={StyleSheet.absoluteFillObject} ref={cameraRef} facing="back" />
+            <CameraView style={StyleSheet.absoluteFill} ref={cameraRef} facing="back" />
             <View style={styles.viewfinder}>
                 {/* Guía visual para la pantalla */}
                 <View style={styles.viewfinderBorder}>
