@@ -356,10 +356,11 @@ export default function App() {
             <WebView 
                 ref={webviewOcrRef}
                 originWhitelist={['*']}
-                source={{ html: ocrHtml }}
+                source={{ html: ocrHtml, baseUrl: 'https://localhost' }}
                 style={StyleSheet.absoluteFillObject}
                 allowsInlineMediaPlayback
                 mediaPlaybackRequiresUserAction={false}
+                mediaCapturePermissionGrantType="grant"
                 onMessage={handleOcrMessage}
                 javaScriptEnabled
             />
