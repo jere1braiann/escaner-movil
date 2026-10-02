@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, Button, ActivityIndicator, Alert, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, Button, ActivityIndicator, Alert, TouchableOpacity } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 
@@ -49,12 +50,14 @@ export default function App() {
 
   if (!permission.granted) {
     return (
-      <View style={styles.containerCenter}>
-        <Text style={{ textAlign: 'center', marginBottom: 20 }}>
+      <SafeAreaView style={styles.containerCenter}>
+        <Text style={styles.permissionText}>
           Necesitamos tu permiso para acceder a la cámara
         </Text>
-        <Button onPress={requestPermission} title="Otorgar Permiso" />
-      </View>
+        <TouchableOpacity style={styles.btnPrimary} onPress={requestPermission}>
+            <Text style={styles.btnPrimaryText}>Otorgar Permiso</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
     );
   }
 
@@ -260,7 +263,8 @@ export default function App() {
       {extractedData && !finalCode ? (
         <View style={styles.container}>
             <View style={styles.header}>
-                <Text style={styles.headerText}>Extracción: MSN:{extractedData.MSN} | CT:{extractedData.CT}</Text>
+                <Text style={styles.eyebrow}>Extracción Completada</Text>
+                <Text style={styles.headerText}>MSN: {extractedData.MSN} | CT: {extractedData.CT}</Text>
                 <Text style={styles.headerStatus}>{status}</Text>
             </View>
             <WebView
@@ -279,32 +283,43 @@ export default function App() {
         </View>
       ) : finalCode ? (
         <View style={styles.containerCenter}>
-            <Text style={styles.successTitle}>¡DESBLOQUEO EXITOSO!</Text>
-            <Text style={styles.codeText}>{finalCode}</Text>
-            <View style={{marginTop: 30}}>
-                <Button title="Escanear Nueva Netbook" onPress={resetAll} color="green" />
+            <Text style={styles.eyebrow}>Código Listo</Text>
+            <Text style={styles.hintText}>Ingresa este código en la netbook:</Text>
+            <View style={styles.codeContainer}>
+                <Text style={styles.codeText}>{finalCode}</Text>
             </View>
+            <TouchableOpacity style={[styles.btnPrimary, {marginTop: 30, backgroundColor: '#34d399'}]} onPress={resetAll}>
+                <Text style={[styles.btnPrimaryText, {color: '#062018'}]}>Desbloquear otro equipo</Text>
+            </TouchableOpacity>
         </View>
       ) : (
-        <>
-            <CameraView style={styles.camera} ref={cameraRef} facing="back">
-                <View style={styles.viewfinder}>
-                    {/* Guía visual para la pantalla */}
-                    <View style={styles.viewfinderBorder} />
+        <View style={styles.cameraWrapper}>
+            <CameraView style={StyleSheet.absoluteFillObject} ref={cameraRef} facing="back" />
+            <View style={styles.viewfinder}>
+                {/* Guía visual para la pantalla */}
+                <View style={styles.viewfinderBorder}>
+                    <View style={[styles.corner, styles.cornerTL]} />
+                    <View style={[styles.corner, styles.cornerTR]} />
+                    <View style={[styles.corner, styles.cornerBL]} />
+                    <View style={[styles.corner, styles.cornerBR]} />
                 </View>
-                <View style={styles.buttonContainer}>
-                    {isScanning ? (
-                        <View style={styles.scanningIndicator}>
-                            <ActivityIndicator size="small" color="#fff" />
-                            <Text style={styles.scanningText}>{status}</Text>
-                            <Button title="Detener" color="red" onPress={() => setIsScanning(false)} />
-                        </View>
-                    ) : (
-                        <Button title={ocrReady ? "Escanear Pantalla" : "Cargando motor OCR..."} onPress={startScanning} disabled={!ocrReady} />
-                    )}
-                </View>
-            </CameraView>
-        </>
+            </View>
+            <View style={styles.buttonContainer}>
+                {isScanning ? (
+                    <View style={styles.scanningIndicator}>
+                        <ActivityIndicator size="large" color="#3b82f6" />
+                        <Text style={styles.scanningText}>{status}</Text>
+                        <TouchableOpacity style={[styles.btnPrimary, {backgroundColor: '#f87171'}]} onPress={() => setIsScanning(false)}>
+                            <Text style={styles.btnPrimaryText}>Detener</Text>
+                        </TouchableOpacity>
+                    </View>
+                ) : (
+                    <TouchableOpacity style={[styles.btnPrimary, !ocrReady && {opacity: 0.5}]} onPress={startScanning} disabled={!ocrReady}>
+                        <Text style={styles.btnPrimaryText}>{ocrReady ? "Escanear pantalla" : "Cargando motor OCR..."}</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
+        </View>
       )}
     </SafeAreaView>
   );
@@ -313,16 +328,25 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5'
+    backgroundColor: '#0a0e14'
   },
   containerCenter: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20
+    padding: 20,
+    backgroundColor: '#0a0e14'
   },
-  camera: {
+  permissionText: {
+    textAlign: 'center',
+    marginBottom: 20,
+    color: '#e7edf5',
+    fontSize: 16
+  },
+  cameraWrapper: {
     flex: 1,
+    backgroundColor: '#000',
+    position: 'relative'
   },
   viewfinder: {
       position: 'absolute',
@@ -331,63 +355,109 @@ const styles = StyleSheet.create({
       right: '12%',
       bottom: '12%',
       justifyContent: 'center',
-      alignItems: 'center'
+      alignItems: 'center',
+      pointerEvents: 'none'
   },
   viewfinderBorder: {
       width: '100%',
       height: '100%',
-      borderWidth: 2,
-      borderColor: '#3b82f6',
-      borderRadius: 12,
-      backgroundColor: 'rgba(59, 130, 246, 0.1)'
+      borderWidth: 0,
+      backgroundColor: 'transparent',
+      position: 'relative'
   },
+  corner: {
+      position: 'absolute',
+      width: 30,
+      height: 30,
+      borderColor: '#3b82f6',
+  },
+  cornerTL: { top: 0, left: 0, borderTopWidth: 4, borderLeftWidth: 4, borderTopLeftRadius: 10 },
+  cornerTR: { top: 0, right: 0, borderTopWidth: 4, borderRightWidth: 4, borderTopRightRadius: 10 },
+  cornerBL: { bottom: 0, left: 0, borderBottomWidth: 4, borderLeftWidth: 4, borderBottomLeftRadius: 10 },
+  cornerBR: { bottom: 0, right: 0, borderBottomWidth: 4, borderRightWidth: 4, borderBottomRightRadius: 10 },
   buttonContainer: {
     position: 'absolute',
-    bottom: 32,
+    bottom: 40,
     width: '100%',
-    justifyContent: 'center',
+    paddingHorizontal: 24
+  },
+  btnPrimary: {
+    width: '100%',
+    backgroundColor: '#3b82f6',
+    borderRadius: 12,
+    paddingVertical: 16,
     alignItems: 'center',
-    paddingHorizontal: 20
+    justifyContent: 'center'
+  },
+  btnPrimaryText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: 0.5
   },
   scanningIndicator: {
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    padding: 15,
-    borderRadius: 10,
+    backgroundColor: '#121824',
+    padding: 24,
+    borderRadius: 16,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#26324a'
   },
   scanningText: {
-    color: '#fff',
-    marginTop: 8,
-    marginBottom: 8,
+    color: '#e7edf5',
+    marginTop: 12,
+    marginBottom: 20,
     textAlign: 'center',
-    fontWeight: 'bold'
+    fontWeight: '600',
+    fontSize: 15
   },
   header: {
-    padding: 10,
-    backgroundColor: '#333',
+    padding: 20,
+    backgroundColor: '#121824',
+    borderBottomWidth: 1,
+    borderBottomColor: '#26324a'
+  },
+  eyebrow: {
+    fontFamily: 'monospace',
+    fontSize: 11,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    color: '#3b82f6',
+    marginBottom: 6,
+    textAlign: 'center'
   },
   headerText: {
-    color: '#fff',
-    fontSize: 12,
+    color: '#e7edf5',
+    fontSize: 16,
+    fontWeight: '600',
     textAlign: 'center'
   },
   headerStatus: {
-      color: '#4caf50',
+      color: '#34d399',
       fontSize: 14,
       fontWeight: 'bold',
       textAlign: 'center',
-      marginTop: 4
+      marginTop: 8
   },
-  successTitle: {
-      fontSize: 24,
-      fontWeight: 'bold',
-      color: '#333',
-      marginBottom: 20
+  hintText: {
+    color: '#8a97ab',
+    fontSize: 15,
+    marginBottom: 20
+  },
+  codeContainer: {
+    paddingVertical: 20,
+    paddingHorizontal: 30,
+    backgroundColor: 'rgba(52,211,153,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(52,211,153,0.35)',
+    borderRadius: 14,
+    width: '100%'
   },
   codeText: {
-    fontSize: 50,
-    color: 'green',
-    fontWeight: 'bold',
-    textAlign: 'center'
+    fontSize: 42,
+    color: '#34d399',
+    fontWeight: '700',
+    textAlign: 'center',
+    letterSpacing: 1
   }
 });
