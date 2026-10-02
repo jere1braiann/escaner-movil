@@ -1,105 +1,23 @@
 import { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import { WebView, WebViewMessageEvent } from 'react-native-webview';
+import { useCameraPermissions } from 'expo-camera'; // Solo lo usamos para pedir el permiso nativo
+import { WebView } from 'react-native-webview';
 
 type ExtractedData = { MSN: string; CT: string; UC: string };
 
 export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
-  const cameraRef = useRef<CameraView>(null);
+  const webviewOcrRef = useRef<WebView>(null);
   
   const [status, setStatus] = useState<string>('');
   const [isScanning, setIsScanning] = useState(false);
+  const [ocrReady, setOcrReady] = useState(false);
   
   // States to manage the flow
   const [validatingData, setValidatingData] = useState<ExtractedData | null>(null);
   const [automating, setAutomating] = useState<ExtractedData | null>(null);
   const [finalCode, setFinalCode] = useState<string | null>(null);
-
-  // Gemini API Key from .env
-  const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-
-  const loopScan = async () => {
-    if (!isScanning) return;
-    
-    if (cameraRef.current && GEMINI_API_KEY) {
-        try {
-            const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.5 });
-            if (photo?.base64) {
-                setStatus('Analizando con IA...');
-                
-                const prompt = `Analiza la imagen de esta pantalla azul de bloqueo.
-Extrae estrictamente:
-1. Machine Serial Number (8 caracteres, los primeros 8 dígitos del MSN)
-2. Certified Time (8 caracteres)
-3. Usage Counter (solo el número final, sin ceros, por ejemplo si dice '00000001' extrae '1')
-
-Responde ÚNICAMENTE con JSON válido en este formato exacto:
-{"MSN": "VALOR", "CT": "VALOR", "UC": "VALOR"}
-No incluyas markdown, ni comillas extra, solo el bloque JSON puro.`;
-
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents: [{
-                            parts: [
-                                { text: prompt },
-                                { inline_data: { mime_type: "image/jpeg", data: photo.base64 } }
-                            ]
-                        }],
-                        generationConfig: { temperature: 0.1 }
-                    })
-                });
-
-                const result = await response.json();
-                
-                if (result.candidates && result.candidates[0]) {
-                    let text = result.candidates[0].content.parts[0].text.trim();
-                    if (text.startsWith('```json')) text = text.substring(7);
-                    if (text.startsWith('```')) text = text.substring(3);
-                    if (text.endsWith('```')) text = text.substring(0, text.length - 3);
-                    
-                    try {
-                        const parsed = JSON.parse(text.trim());
-                        if (parsed.MSN && parsed.CT && parsed.UC) {
-                            setIsScanning(false);
-                            setStatus('');
-                            setValidatingData({
-                                MSN: parsed.MSN.toUpperCase(),
-                                CT: parsed.CT.toUpperCase(),
-                                UC: parsed.UC
-                            });
-                            return; // Stop loop
-                        }
-                    } catch (e) {
-                        console.log("Error parseando JSON de Gemini:", text);
-                    }
-                }
-            }
-            // Si falló, seguimos intentando
-            if (isScanning) setTimeout(loopScan, 1500);
-        } catch (e) {
-            console.log("Error consultando Gemini:", e);
-            if (isScanning) setTimeout(loopScan, 1500);
-        }
-    } else {
-        if (!GEMINI_API_KEY) {
-            Alert.alert("Error", "Falta configurar EXPO_PUBLIC_GEMINI_API_KEY en el archivo .env");
-            setIsScanning(false);
-        } else {
-            if (isScanning) setTimeout(loopScan, 1000);
-        }
-    }
-  };
-
-  useEffect(() => {
-    if (isScanning) {
-        loopScan();
-    }
-  }, [isScanning]);
 
   if (!permission) {
     return <View />;
@@ -119,11 +37,21 @@ No incluyas markdown, ni comillas extra, solo el bloque JSON puro.`;
   }
 
   const startScanning = () => {
+      if (!ocrReady) {
+          Alert.alert("Aviso", "El motor OCR se está cargando, espera un segundo...");
+          return;
+      }
       setValidatingData(null);
       setAutomating(null);
       setFinalCode(null);
       setIsScanning(true);
-      setStatus('Capturando pantalla...');
+      setStatus('Mantén la cámara estable frente a los números...');
+      webviewOcrRef.current?.injectJavaScript(`window.postMessage(JSON.stringify({ type: 'START' }), '*'); true;`);
+  };
+
+  const stopScanning = () => {
+      setIsScanning(false);
+      webviewOcrRef.current?.injectJavaScript(`window.postMessage(JSON.stringify({ type: 'STOP' }), '*'); true;`);
   };
 
   const resetAll = () => {
@@ -134,7 +62,155 @@ No incluyas markdown, ni comillas extra, solo el bloque JSON puro.`;
       setStatus('');
   };
 
-  // JAVASCRIPT A INYECTAR EN LA WEB OFICIAL PARA AUTOMATIZAR
+  const handleOcrMessage = (event: any) => {
+    try {
+        const data = JSON.parse(event.nativeEvent.data);
+        if (data.type === 'READY') {
+            setOcrReady(true);
+        } else if (data.type === 'SUCCESS') {
+            stopScanning();
+            setStatus('');
+            setValidatingData({
+                MSN: data.data.MSN.toUpperCase(),
+                CT: data.data.CT.toUpperCase(),
+                UC: data.data.UC
+            });
+        } else if (data.type === 'ERROR') {
+            console.log("Error de WebView OCR:", data.error);
+        }
+    } catch(e) {}
+  };
+
+  // --- HTML PARA EL ESCÁNER WEBRTC + TESSERACT OCR INTEGRADO (Totalmente silencioso y rápido) ---
+  const ocrHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+      body, html { margin: 0; padding: 0; background: #000; overflow: hidden; height: 100vh; width: 100vw; }
+      video { width: 100%; height: 100%; object-fit: cover; display: block; }
+      canvas { display: none; }
+    </style>
+    </head>
+    <body>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <script>
+      let worker = null;
+      Tesseract.createWorker('eng').then(w => {
+        worker = w;
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'READY' }));
+      });
+
+      const video = document.getElementById('video');
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+      let scanning = false;
+
+      async function initCamera() {
+          try {
+              const stream = await navigator.mediaDevices.getUserMedia({ 
+                  video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } 
+              });
+              video.srcObject = stream;
+          } catch (e) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ERROR', error: 'Cámara WebRTC bloqueada: ' + e.message }));
+          }
+      }
+      initCamera();
+
+      async function loopTesseract() {
+        if (!scanning || !worker || video.readyState !== video.HAVE_ENOUGH_DATA) {
+            if(scanning) setTimeout(loopTesseract, 500);
+            return;
+        }
+        
+        try {
+            const inset = 0.12;
+            const cropX = video.videoWidth * inset;
+            const cropY = video.videoHeight * inset;
+            const cropW = video.videoWidth * (1 - inset * 2);
+            const cropH = video.videoHeight * (1 - inset * 2);
+            
+            const scale = 2.0;
+            const scaledW = cropW * scale;
+            const scaledH = cropH * scale;
+
+            canvas.width = scaledW;
+            canvas.height = scaledH;
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, scaledW, scaledH);
+
+            const imageData = ctx.getImageData(0, 0, scaledW, scaledH);
+            const px = imageData.data;
+            for (let i = 0; i < px.length; i += 4) {
+                const r = px[i], g = px[i + 1];
+                if ((r + g) > 180) {
+                    px[i] = 0; px[i+1] = 0; px[i+2] = 0;
+                } else {
+                    px[i] = 255; px[i+1] = 255; px[i+2] = 255;
+                }
+            }
+            ctx.putImageData(imageData, 0, 0);
+            
+            const finalB64 = canvas.toDataURL('image/jpeg', 1.0);
+            const result = await worker.recognize(finalB64);
+            const texto = result.data.text;
+            
+            const fixHex = (str) => {
+                if (!str) return "";
+                return str.toUpperCase()
+                    .replace(/O|Q/g, '0')
+                    .replace(/I|L|T/g, '1')
+                    .replace(/Z/g, '2')
+                    .replace(/S/g, '5')
+                    .replace(/G/g, '6');
+            };
+
+            let msn = "", ct = "", uc = "";
+            const msnMatch = texto.match(/Machine Serial Number[:\\s]*([A-Z0-9]{8})/i) || texto.match(/\\b([A-Z0-9]{8})\\b/i);
+            if (msnMatch) msn = fixHex(msnMatch[1] || msnMatch[0]);
+            
+            const ctMatch = texto.match(/Certified Time[:\\s]*([A-Z0-9]{8})/i);
+            if (ctMatch) ct = fixHex(ctMatch[1]);
+            else {
+                const hex8 = texto.match(/\\b([A-Z0-9]{8})\\b/ig);
+                if (hex8 && hex8.length > 1) ct = fixHex(hex8[1]);
+            }
+            
+            const ucMatch = texto.match(/Usage Counter[:\\s]*[O0]*([1-9][A-Z0-9]*)/i);
+            if (ucMatch) {
+                uc = ucMatch[1].replace(/O/ig, '0').replace(/I|L/ig, '1').replace(/S/ig, '5').replace(/Z/ig, '2').replace(/B/ig, '8');
+            }
+            
+            if (msn && ct && uc) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'SUCCESS', data: { MSN: msn, CT: ct, UC: uc } }));
+                return; // Detiene el escaneo al encontrar éxito
+            }
+        } catch(e) {}
+        
+        if (scanning) setTimeout(loopTesseract, 500);
+      }
+
+      window.addEventListener("message", (event) => {
+          try {
+              const data = JSON.parse(event.data);
+              if (data.type === 'START') {
+                  scanning = true;
+                  loopTesseract();
+              } else if (data.type === 'STOP') {
+                  scanning = false;
+              }
+          } catch(e) {}
+      });
+    </script>
+    </body>
+    </html>
+  `;
+
+  // --- JAVASCRIPT A INYECTAR EN LA WEB OFICIAL PARA AUTOMATIZAR ---
   const injectedJs = automating ? `
     const msn = "${automating.MSN}";
     const ct = "${automating.CT}";
@@ -225,11 +301,11 @@ No incluyas markdown, ni comillas extra, solo el bloque JSON puro.`;
         </View>
 
       ) : validatingData ? (
-        // PANTALLA 2: VALIDACIÓN DE DATOS (OCR Gemini)
+        // PANTALLA 2: VALIDACIÓN DE DATOS (OCR Tesseract)
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.container}>
             <ScrollView contentContainerStyle={styles.scrollCenter}>
                 <Text style={styles.eyebrow}>Revisión</Text>
-                <Text style={styles.hintText}>Verifica que la IA haya leído bien los códigos:</Text>
+                <Text style={styles.hintText}>Verifica que el OCR haya leído bien los códigos:</Text>
                 
                 <View style={styles.field}>
                     <Text style={styles.label}>Machine Serial Number</Text>
@@ -275,9 +351,18 @@ No incluyas markdown, ni comillas extra, solo el bloque JSON puro.`;
         </KeyboardAvoidingView>
 
       ) : (
-        // PANTALLA 1: ESCÁNER
+        // PANTALLA 1: ESCÁNER (Renderizado por WebView WebRTC de forma silenciosa)
         <View style={styles.cameraWrapper}>
-            <CameraView style={{ flex: 1 }} ref={cameraRef} facing="back" />
+            <WebView 
+                ref={webviewOcrRef}
+                originWhitelist={['*']}
+                source={{ html: ocrHtml }}
+                style={StyleSheet.absoluteFillObject}
+                allowsInlineMediaPlayback
+                mediaPlaybackRequiresUserAction={false}
+                onMessage={handleOcrMessage}
+                javaScriptEnabled
+            />
             <View style={styles.viewfinder}>
                 <View style={styles.viewfinderBorder}>
                     <View style={[styles.corner, styles.cornerTL]} />
@@ -291,13 +376,13 @@ No incluyas markdown, ni comillas extra, solo el bloque JSON puro.`;
                     <View style={styles.scanningIndicator}>
                         <ActivityIndicator size="large" color="#3b82f6" />
                         <Text style={styles.scanningText}>{status}</Text>
-                        <TouchableOpacity style={[styles.btnPrimary, {backgroundColor: '#f87171'}]} onPress={() => setIsScanning(false)}>
+                        <TouchableOpacity style={[styles.btnPrimary, {backgroundColor: '#f87171'}]} onPress={stopScanning}>
                             <Text style={styles.btnPrimaryText}>Detener</Text>
                         </TouchableOpacity>
                     </View>
                 ) : (
-                    <TouchableOpacity style={styles.btnPrimary} onPress={startScanning}>
-                        <Text style={styles.btnPrimaryText}>Escanear pantalla</Text>
+                    <TouchableOpacity style={[styles.btnPrimary, !ocrReady && {opacity: 0.5}]} onPress={startScanning} disabled={!ocrReady}>
+                        <Text style={styles.btnPrimaryText}>{ocrReady ? "Escanear pantalla" : "Cargando motor OCR..."}</Text>
                     </TouchableOpacity>
                 )}
             </View>
